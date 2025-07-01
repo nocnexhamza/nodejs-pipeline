@@ -63,13 +63,39 @@ environment {
                 checkout scm
             }
         }
-        stage('Build') {
-            steps {
-                script {
-                    dockerImage = docker.build("${env.DOCKER_IMAGE}:${env.BUILD_ID}")
-                }
-            }
+        stage('Build & Push Image') {
+      steps {
+        container('jnlp') {
+          withCredentials([usernamePassword(
+            credentialsId: 'dockerhublogin',
+            usernameVariable: 'DOCKER_USER',
+            passwordVariable: 'DOCKER_PASS'
+          )]) {
+            sh '''
+              # Verify Docker credentials
+              echo "=== Docker Credentials Test ==="
+              docker login -u ${DOCKER_USER} -p ${DOCKER_PASS} docker.io || \
+                { echo "Docker login failed"; exit 1; }
+              
+              # Build and push with verification
+              echo "=== Building Image ==="
+              buildctl build \
+                --frontend dockerfile.v0 \
+                --local context=. \
+                --local dockerfile=. \
+                --output type=image,name=docker.io/${DOCKER_IMAGE}:${IMAGE_TAG},push=true \
+                --opt registry.username=${DOCKER_USER} \
+                --opt registry.password=${DOCKER_PASS} || \
+                { echo "Image build failed"; exit 1; }
+              
+              echo "=== Image Verification ==="
+              docker pull docker.io/${DOCKER_IMAGE}:${IMAGE_TAG} || \
+                { echo "Image pull verification failed"; exit 1; }
+            '''
+          }
         }
+      }
+    }
         stage('Test') {
             steps {
                 script {
