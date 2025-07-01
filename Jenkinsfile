@@ -20,9 +20,18 @@ spec:
       image: nocnex/jenkins-agent:nerdctlv4
       args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
       tty: true
+      env:
+        - name: BUILDKIT_HOST
+          value: "tcp://buildkitd:1234"
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
+    - name: buildkitd
+      image: moby/buildkit:latest
+      args: ["--addr", "tcp://0.0.0.0:1234"]
+      securityContext:
+        privileged: true
+      volumeMounts:
         - name: buildkit-cache
           mountPath: /tmp/buildkit-cache
     - name: node
@@ -48,21 +57,7 @@ spec:
         }
     }
     
-    environment {
-        DOCKER_IMAGE = "nocnex/nodejs-app-v2"
-        REGISTRY = "docker.io"
-        KUBE_NAMESPACE = "devops-tools"
-        IMAGE_TAG = "${BUILD_TAG}"
-        WORKER_NODE = "worker-node-1"
-    }
-    
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-        
         stage('Build & Push Image') {
             steps {
                 container('jnlp') {
@@ -72,18 +67,13 @@ spec:
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh '''
-                            # Build and push using BuildKit (no Docker CLI needed)
-                            echo "=== Building Image with BuildKit ==="
                             buildctl build \
                                 --frontend dockerfile.v0 \
                                 --local context=. \
                                 --local dockerfile=. \
                                 --output type=image,name=${REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG},push=true \
                                 --opt registry.username=${DOCKER_USER} \
-                                --opt registry.password=${DOCKER_PASS} || \
-                                { echo "Image build failed"; exit 1; }
-                            
-                            echo "=== Image pushed successfully ==="
+                                --opt registry.password=${DOCKER_PASS}
                         '''
                     }
                 }
